@@ -1,0 +1,318 @@
+---
+title: "19088325 Portfolio"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+I have difficulty getting sufficient sleep. I consistently and autonomously wake up early in the morning regardless of what time I fell asleep, so my length of sleep is typically short.
+I want to investigate how I could improve my length of sleep. I researched possible methods, and chose to measure my water intake, based on a news article from the Independent, and my room temperature and stress levels, based on the commonly used Pittsburgh Sleep Quality Index questionnaire, to determine if they could impact my sleep quality.
+
+<br/>
+![*News article from the Independent*](\Users\jasmn\Documents\uni\STAT601 Statistical Methods\article.png)
+
+<br/>
+Here, I will analyse a dataset which contains daily data about my length of sleep (in hours), water intake (in mL), stress levels (on a scale from 1 to 5, 1 being lowest), and room temperature upon waking up (in celsius).
+
+```{r}
+library(readxl)
+library(modelr)
+
+mydata <- read_excel("C:/Users/jasmn/Documents/uni/STAT601 Statistical Methods/SLEEP DATA FINAL.xlsx")
+
+mydata
+```
+
+## Linear regression
+I am first going to plot linear models of the variables against length of sleep, to see if any have a linear relationship worth investigating.
+
+```{r}
+plot(mydata$`Hours slept` ~ mydata$`Water consumption`, xlab="Water intake", ylab="Hours slept", main="Water intake against sleep") +
+  abline(lm(mydata$`Hours slept` ~ mydata$`Water consumption`), col="red")
+```
+
+```{r}
+plot(mydata$`Hours slept` ~ mydata$`Room temperature`, xlab="Temperature", ylab="Hours slept", main="Room temperature against sleep") +
+  abline(lm(mydata$`Hours slept` ~ mydata$`Room temperature`), col="red")
+```
+
+```{r}
+plot(mydata$`Hours slept` ~ mydata$`Stress level`, xlab="Stress level", ylab="Hours slept", main="Stress level against sleep") +
+  abline(lm(mydata$`Hours slept` ~ mydata$`Stress level`), col="red")
+```
+
+Out of all three variables, a linear trend appears appropriate only for room temperature - room temperature appears most likely to have a non-independent relationship with length of sleep. 
+
+```{r}
+summary(lm(mydata$`Hours slept` ~ mydata$`Room temperature`))
+```
+
+The null hypothesis is that there is no linear trend/relationship (variables are independent) - H0: β = 0.
+
+The p-value is 0.01. The p-value is the probability, given that the null is true, of obtaining the observation or one more extreme. Here, more extreme means a β-value different from 0. 
+
+Since the p-value is less than 0.05, I have evidence to reject the null. This suggests that there is no independence between length of sleep and room temperature.
+
+I will perform a Fisher's exact test, to further investigate the independence of their relationship.
+
+## Fisher's exact test
+
+I need to determine what a significantly low and high temperature will be, using a confidence interval of 95%.
+
+```{r}
+temp_mean <- mean(mydata$`Room temperature`)
+sleep_mean <- mean(mydata$`Hours slept`)
+```
+
+```{r}
+t.test(mydata$`Room temperature`, alternative="two.sided")
+```
+
+**Room temperature**
+
+* Lower 5% = 19.30
+* Upper 5% = 20.31
+
+```{r}
+t.test(mydata$`Hours slept`, alternative="two.sided")
+```
+
+**Length of sleep**
+
+* Lower 5% = 6.32
+* Upper 5% = 7.25
+
+```{r}
+temp_l5 <- 19.30
+temp_u5 <- 20.31
+
+sleep_l5 <- 6.32
+sleep_u5 <- 7.25
+  
+#High room temp and high length of sleep
+table(mydata$`Room temperature` > temp_u5 & mydata$`Hours slept` > sleep_u5)
+
+#High room temp and low length of sleep
+table(mydata$`Room temperature` > temp_u5 & mydata$`Hours slept` < sleep_l5)
+
+#Low room temp and high length of sleep
+table(mydata$`Room temperature` < temp_l5 & mydata$`Hours slept` > sleep_u5)
+
+#Low room temp and low length of sleep
+table(mydata$`Room temperature` < temp_l5 & mydata$`Hours slept` < sleep_l5)
+```
+
+```{r}
+#Creating two-way table
+temp_table <- matrix(c(3,1,1,3), 2, 2)
+
+colnames(temp_table) <- c("High temp", "Low temp")
+rownames(temp_table) <- c("High sleep", "Low sleep")
+
+temp_table <- as.table(temp_table)
+
+temp_table
+
+fisher.test(temp_table, alternative="two.sided")
+```
+
+For this test, the null hypothesis is that the two variables - length of sleep and room temperature - are independent.
+
+The p-value is greater than 0.05. Hence, I cannot reject the null.
+
+This gives two contradicting results. The linear regression p-value suggests that there is no independence, but Fisher's exact test suggests that there is independence.
+
+I want to test to see if I have made any type 1 or type 2 errors.
+
+For the linear regression, I rejected the null. It is possible for me to have committed a type 1 error.
+
+For the Fisher's exact test, I accepted the null. It is possible for me to have committed a type 2 error.
+
+## Calculating Type 1 Error
+```{r}
+set.seed(0)
+
+#Get p-value of linear regression (lm)
+lmp <- function (modelobject) {
+    if (class(modelobject) != "lm") stop("Not an object of class 'lm' ")
+    f <- summary(modelobject)$fstatistic
+    p <- pf(f[1],f[2],f[3],lower.tail=F)
+    attributes(p) <- NULL
+    return(p)
+}
+
+#Resample function
+resample_a <- function(a, b){
+  A <- sample(a, size=length(a), replace=TRUE)
+  B <- sample(b, size=length(b), replace=TRUE)
+  
+  p <- lmp(lm(A~B))
+  
+  return(p)
+}
+
+#1000 resamplings
+p_val <- replicate(1000, resample_a(mydata$`Hours slept`, mydata$`Room temperature`))
+
+#Probability of committing a type 1 error
+(table(p_val < 0.05)/1000)['TRUE']
+```
+
+The probability of committing a type 1 error for my linear regression is 0.045 - α = 0.045. α is small, β is large.
+
+Since α is small and β is large, it is unlikely that my rejection of the null hypothesis (β = 0, independent) is an error. It is more likely that the null is false - more likely that variables are not independent. 
+
+
+```{r}
+#Resample function #############################################
+resample_b <- function(sleep, temperature){
+  
+  S <- sample(sleep, size=length(sleep), replace=TRUE)
+  T <- sample(temperature, size=length(temperature), replace=TRUE)
+  
+  bind <- cbind(S, T)
+  colnames(bind) <- c("Sleep", "Temp")
+
+  resample <- as.data.frame(bind)
+  
+  return(resample)
+}
+```
+
+```{r}
+#Get 95% CI values ############################################
+t.test_p <- function(D){
+  
+  #Lower limit
+  lower <- t.test(D)$conf.int[1]
+  
+  #Upper limit
+  upper <- t.test(D)$conf.int[2]
+  
+  limits <- c(lower, upper)
+  
+  return(limits)
+}
+```
+
+```{r}
+#Get values to create 2-way table #############################
+
+table_function <- function(D){
+  
+  s_lim <- t.test_p(D$Sleep)
+  t_lim <- t.test_p(D$Temp)
+  
+  #High sleep, high temp
+  a <- (table(D$Sleep >= s_lim[2] & D$Temp >= t_lim[2])['TRUE'])
+  
+  if(is.na(a)) {
+    a <- 0
+  }
+  else {
+    a <- a
+  }
+  
+  #Low sleep, high temp
+  b <- (table(D$Sleep <= s_lim[1] & D$Temp >= t_lim[2])['TRUE'])
+  
+    if(is.na(b)) {
+    b <- 0
+  }
+  else {
+    b <- b
+  }
+  
+  #High sleep, low temp
+  c <- (table(D$Sleep >= s_lim[2] & D$Temp <= t_lim[1])['TRUE'])
+
+    if(is.na(c)) {
+    c <- 0
+  }
+  else {
+    c <- c
+  }
+  
+  #Low sleep, low temp 
+  d <- (table(D$Sleep <= s_lim[1] & D$Temp <= t_lim[1])['TRUE'])
+
+    if(is.na(d)) {
+    d <- 0
+  }
+  else {
+    d <- d
+  }
+  
+  f_matrix <- matrix(c(a, b, c, d), 2, 2)
+  
+  colnames(f_matrix) <- c("High temp", "Low temp")
+  rownames(f_matrix) <- c("High sleep", "Low sleep")
+  
+  return(f_matrix)
+}
+```
+
+```{r}
+#Get p-value of Fisher's exact test ############################
+fisher_p <- function(D){
+  fisher.test(as.table(D), alternative="two.sided")$p.value
+}
+```
+
+```{r}
+#COMPLETE FUNCTION
+final <- function(sleep_col, temp_col){
+  
+  sample <- resample_b(sleep_col, temp_col)
+  
+  sample_table <- table_function(sample)
+  
+  sample_fisher_p <- fisher_p(sample_table)
+  
+  return(sample_fisher_p)
+}
+```
+
+## Calculating Type 2 Error
+
+```{r}
+set.seed(1)
+
+#Get p-values from Fisher's test over 1000 samples
+fishers <- replicate(1000, final(mydata$`Hours slept`, mydata$`Room temperature`))
+
+#Probability of committing a Type 2 error 
+(table(fishers > 0.05)/1000)['TRUE']
+```
+
+The probability of committing a type 2 error for my Fisher's exact test is 0.986 - β = 0.986. β is large, α is small.
+
+β is very high, so it is likely that my failure to reject the null hypothesis (two variables - length of sleep and room temperature - are independent) is false. This means that it is likely that the null is false - variables are not independent.
+
+The two error tests conclude that:
+
+* (Linear regression null hypothesis: length of sleep and room temperature are independent) is very likely to be false
+* (Fisher's exact test null hypothesis: length of sleep and room temperature are independent) is very likely to be false
+
+## Conclusion
+I can conclude that it is very likely that length of sleep and room temperature are not independent of each other.
+
+```{r}
+max(mydata$`Room temperature`)
+min(mydata$`Room temperature`)
+```
+
+This seems like a reasonable conclusion to draw. My dataset had a relatively small range of values, of standard room temperature (18 - 22 degrees celsius). Lower standard room temperatures will be less comfortable, hence disturbing my sleep. 
+
+From the previous linear regression, the R-squared value is somewhat low - R-squared = 0.24. This means that the linear regression model does not fit the datapoints for this dataset very well. Based on my previous conclusion it is possible that this linear model (i.e, *length of sleep = 0.49x(room temperature) - 2.94*) was suitable to fit the data I provided, but may not be suitable to model the dataset for more extreme values - very cold AND hot temperatures will be uncomfortable and disturb my sleep - hence the low p-value and R-squared value. 
+
+I did not find a direct linear relationship between length of sleep and water consumption or stress level. However, since it is possible that the linear regression model I plotted for the relationship between room temperature and length of sleep is unsuitable, a multivariate regression model that includes these variables could improve the accuracy of the linear regression model.
+
+## Summary
+I analysed a dataset that includes data about my length of sleep, room temperature upon waking up, daily water intake, and stress levels. 
+
+Linear regression (p=0.01) and Fisher's exact test (p=0.5) provided two opposing conclusions, but doing error testing for the two analyses (α = 0.045, β = 0.986, respectively] allowed me to find that length of sleep and room temperature are not independent of each other.
+
+The room temperature impacted my length of sleep, probably because colder temperatures disturb my sleep whilst warmer (more comfortable) temperatures did not. I did not find a direct relationship between length of sleep and water intake or stress level, based on scattergraphs. 
